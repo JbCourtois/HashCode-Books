@@ -1,3 +1,5 @@
+import bisect
+import json
 from glob import glob
 
 
@@ -85,3 +87,10 @@ if __name__ == '__main__':
         score += case.score
 
     print('Submission score:', score)
+
+    with open('rankings.json') as file:
+        rankings = json.load(file)
+
+    ranks, scores = zip(*rankings)
+    index = bisect.bisect_left(scores, score)
+    print("Rank:", ranks[index - 1])
