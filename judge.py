@@ -1,4 +1,5 @@
 import bisect
+from collections import defaultdict
 import json
 from glob import glob
 
@@ -11,14 +12,22 @@ def read_int_array(stream):
     return [int(x) for x in stream.readline().split()]
 
 
-class Library:
+class InvalidSubmissionError(ValueError):
+    pass
+
+
+class Server:
     @classmethod
     def from_input(cls, stream):
         self = cls()
-        _, self.signup, self.flow = read_int_array(stream)
-        self.books = set(read_int_array(stream))
-
+        self.size, self.capacity = read_int_array(stream)
         return self
+
+
+class Row:
+    def __init__(self):
+        self.blocks = {}  # slot -> reason of block
+        self.capacities = defaultdict(int)  # pool -> sum of capacities
 
 
 class Case:
@@ -44,34 +53,58 @@ class Case:
         self.debug('-' * FILL_WIDTH)
 
     def parse_in(self, stream):
-        _, nb_libraries, self.limit = read_int_array(stream)
-        self.book_scores = read_int_array(stream)
-        self.libraries = [Library.from_input(stream) for _ in range(nb_libraries)]
+        nb_rows, self.nb_slots, nb_x, self.nb_pools, self.nb_servers = read_int_array(stream)
+        self.rows = [Row() for _ in range(nb_rows)]
+
+        # Forbidden slots
+        for _ in range(nb_x):
+            block_row, block_slot = read_int_array(stream)
+            self.rows[block_row].blocks[block_slot] = -1
+
+        # Servers
+        self.servers = [Server.from_input(stream) for _ in range(self.nb_servers)]
 
     def parse_out(self, stream):
-        books_delivered = set()
-        nb_libraries = read_int(stream)
+        for server_id in range(self.nb_servers):
+            raw = stream.readline().rstrip()
+            if raw == 'x':
+                continue
 
-        day = 0
+            server = self.servers[server_id]
+            row_id, slot_id, pool_id = [int(x) for x in raw.split()]
 
-        for _ in range(nb_libraries):
-            lib_id, _ = read_int_array(stream)
-            library = self.libraries[lib_id]
-            day += library.signup
-            if day >= self.limit:
-                break
+            try:
+                try:
+                    row = self.rows[row_id]
+                except IndexError:
+                    raise InvalidSubmissionError(f'Row {row_id} is out of bounds')
 
-            can_scan = (self.limit - day) * library.flow
-            books = library.books.intersection(read_int_array(stream)[:can_scan])
+                if slot_id < 0 or slot_id + server.size > self.nb_slots:
+                    raise InvalidSubmissionError('Out of bounds')
 
-            self.debug(f'Scanned books {books} from library {lib_id}.')
-            books_delivered.update(books)
+                for _ in range(server.size):
+                    if (reason := row.blocks.get(slot_id)) is not None:
+                        if reason == -1:
+                            raise InvalidSubmissionError('Forbidden slot')
+                        else:
+                            raise InvalidSubmissionError(
+                                f'Slot already oppupied by server {reason}')
 
-        total_score = sum(self.book_scores[book_id] for book_id in books_delivered)
-        self.debug('Overall scanned books:', books_delivered)
-        self.debug('Total score:', total_score)
+                    row.blocks[slot_id] = server_id
+                    slot_id += 1
+            except Exception as exc:
+                raise InvalidSubmissionError(
+                    f'Cannot place server {server_id} at position ({row_id}, {slot_id}): {exc}'
+                ) from exc
 
-        self.score = total_score
+            row.capacities[pool_id] += server.capacity
+
+        # Score
+        self.score = min(self.get_score(pool_id) for pool_id in range(self.nb_pools))
+
+    def get_score(self, pool_id):
+        capacities = [row.capacities[pool_id] for row in self.rows]
+        return sum(capacities) - max(capacities)
 
 
 def get_files(foldername):
@@ -82,7 +115,7 @@ if __name__ == '__main__':
     score = 0
     filenames = get_files('Inputs').intersection(get_files('Outputs'))
     for filename in filenames:
-        case = Case()
+        case = Case(debug=True)
         case.run(filename)
         score += case.score
 
